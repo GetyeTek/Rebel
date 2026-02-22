@@ -5,20 +5,17 @@ import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "dictionary")
 data class WordEntity(
-    @PrimaryKey val word: String,
-    val byteCode: Int
+    @PrimaryKey val id: Int,
+    val word: String
 )
 
 @Dao
 interface DictionaryDao {
-    @Query("SELECT * FROM dictionary WHERE word = :word LIMIT 1")
-    suspend fun getWord(word: String): WordEntity?
+    @Query("SELECT id FROM dictionary WHERE word = :word LIMIT 1")
+    suspend fun getWordId(word: String): Int?
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(word: WordEntity)
-
-    @Query("SELECT * FROM dictionary")
-    fun getAll(): Flow<List<WordEntity>>
+    @Query("SELECT word FROM dictionary WHERE id = :id LIMIT 1")
+    suspend fun getWordById(id: Int): String?
 }
 
 @Database(entities = [WordEntity::class], version = 1)
@@ -29,20 +26,29 @@ abstract class GhostDatabase : RoomDatabase() {
 class GhostSqueezer(private val dao: DictionaryDao) {
     suspend fun compress(text: String): ByteArray {
         val output = mutableListOf<Byte>()
-        text.split(" ").forEach { word ->
-            val clean = word.lowercase().trim()
-            if (clean.isEmpty()) return@forEach
-            
-            val match = dao.getWord(clean)
-            if (match != null) {
-                output.add((match.byteCode + 128).toByte())
+        // Split by Amharic space (\u1361) or standard whitespace
+        val words = text.split(Regex("[\\s\\u1361]+"))
+
+        for (word in words) {
+            val clean = word.trim()
+            if (clean.isEmpty()) continue
+
+            val wordId = dao.getWordId(clean)
+            if (wordId != null) {
+                // Encode ID as Varint (Base-128)
+                var v = wordId
+                while (v >= 0x80) {
+                    output.add(((v and 0x7F) or 0x80).toByte())
+                    v = v ushr 7
+                }
+                output.add(v.toByte())
             } else {
-                // Literal tag for unknown word: [word]
-                output.add('['.code.toByte())
-                output.addAll(clean.toByteArray().toList())
-                output.add(']'.code.toByte())
+                // Literal Fallback: Marker 0x00 + Length Byte + UTF-8 Bytes
+                output.add(0.toByte())
+                val raw = clean.toByteArray(Charsets.UTF_8)
+                output.add(raw.size.coerceAtMost(255).toByte())
+                output.addAll(raw.toList())
             }
-            output.add(32.toByte()) // Space separator
         }
         return output.toByteArray()
     }
@@ -52,27 +58,30 @@ class GhostSqueezer(private val dao: DictionaryDao) {
         var i = 0
         while (i < bytes.size) {
             val b = bytes[i].toInt() and 0xFF
-            if (b == 0) { i++; continue }
             
-            when {
-                b >= 128 -> {
-                    // In a full implementation, we'd query the DB here.
-                    // For now, we show the Token ID to prove the squeeze.
-                    sb.append("«T${b-128}» ")
-                }
-                b == '['.code -> {
-                    val end = bytes.indices.find { it > i && bytes[it] == ']'.code.toByte() }
-                    if (end != null) {
-                        val word = String(bytes.copyOfRange(i + 1, end))
-                        sb.append("$word ")
-                        i = end
-                    }
-                }
-                b == 32 -> sb.append(" ")
-                else -> sb.append(b.toChar())
+            if (b == 0) {
+                // Literal read
+                val len = bytes[i + 1].toInt() and 0xFF
+                val wordBytes = bytes.copyOfRange(i + 2, i + 2 + len)
+                sb.append(String(wordBytes, Charsets.UTF_8)).append(" ")
+                i += 2 + len
+            } else {
+                // Varint read
+                var value = 0
+                var shift = 0
+                var currentByte: Int
+                do {
+                    currentByte = bytes[i].toInt() and 0xFF
+                    value = value or ((currentByte and 0x7F) shl shift)
+                    shift += 7
+                    if (currentByte >= 0x80) i++
+                } while (currentByte >= 0x80 && i < bytes.size)
+                
+                val word = dao.getWordById(value)
+                sb.append(word ?: "?").append(" ")
+                i++
             }
-            i++
         }
-        return sb.toString().replace(Regex("\\s+"), " ").trim()
+        return sb.toString().trim()
     }
 }
