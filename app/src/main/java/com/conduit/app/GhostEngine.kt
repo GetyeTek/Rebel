@@ -1,7 +1,9 @@
 package com.conduit.app
 
 import androidx.room.*
-import kotlinx.coroutines.flow.Flow
+import java.util.zip.Deflater
+import java.util.zip.Inflater
+import java.io.ByteArrayOutputStream
 
 @Entity(tableName = "dictionary")
 data class WordEntity(
@@ -56,23 +58,36 @@ class GhostSqueezer(private val dao: DictionaryDao) {
                 output.addAll(raw.toList())
             }
         }
-        return output.toByteArray()
+        val rawBytes = output.toByteArray()
+        val deflater = Deflater(Deflater.BEST_COMPRESSION)
+        deflater.setInput(rawBytes)
+        deflater.finish()
+        val buffer = ByteArray(rawBytes.size + 10)
+        val compressedSize = deflater.deflate(buffer)
+        return buffer.copyOfRange(0, compressedSize)
     }
 
-    suspend fun decompress(bytes: ByteArray): String {
+    suspend fun decompress(compressedBytes: ByteArray): String {
+        val inflater = Inflater()
+        inflater.setInput(compressedBytes)
+        val outputStream = ByteArrayOutputStream(compressedBytes.size)
+        val buffer = ByteArray(1024)
+        while (!inflater.finished()) {
+            val count = inflater.inflate(buffer)
+            outputStream.write(buffer, 0, count)
+        }
+        val bytes = outputStream.toByteArray()
+
         val sb = StringBuilder()
         var i = 0
         while (i < bytes.size) {
             val b = bytes[i].toInt() and 0xFF
-            
             if (b == 0) {
-                // Literal read
                 val len = bytes[i + 1].toInt() and 0xFF
                 val wordBytes = bytes.copyOfRange(i + 2, i + 2 + len)
                 sb.append(String(wordBytes, Charsets.UTF_8)).append(" ")
                 i += 2 + len
             } else {
-                // Varint read
                 var value = 0
                 var shift = 0
                 var currentByte: Int
@@ -82,7 +97,6 @@ class GhostSqueezer(private val dao: DictionaryDao) {
                     shift += 7
                     if (currentByte >= 0x80) i++
                 } while (currentByte >= 0x80 && i < bytes.size)
-                
                 val word = dao.getWordById(value)
                 sb.append(word ?: "?").append(" ")
                 i++
