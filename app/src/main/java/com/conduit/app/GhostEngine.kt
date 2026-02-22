@@ -52,22 +52,27 @@ class GhostSqueezer(private val dao: DictionaryDao) {
         var i = 0
         while (i < bytes.size) {
             val b = bytes[i].toInt() and 0xFF
+            if (b == 0) { i++; continue }
+            
             when {
                 b >= 128 -> {
-                    // Dictionary lookup logic would go here
-                    sb.append("TOKEN_${b-128} ")
+                    // In a full implementation, we'd query the DB here.
+                    // For now, we show the Token ID to prove the squeeze.
+                    sb.append("«T${b-128}» ")
                 }
                 b == '['.code -> {
-                    val end = bytes.indexOf(']'.code.toByte(), i)
-                    if (end != -1) {
-                        sb.append(String(bytes.copyOfRange(i + 1, end)) + " ")
+                    val end = bytes.indices.find { it > i && bytes[it] == ']'.code.toByte() }
+                    if (end != null) {
+                        val word = String(bytes.copyOfRange(i + 1, end))
+                        sb.append("$word ")
                         i = end
                     }
                 }
+                b == 32 -> sb.append(" ")
                 else -> sb.append(b.toChar())
             }
             i++
         }
-        return sb.toString()
+        return sb.toString().replace(Regex("\\s+"), " ").trim()
     }
 }
