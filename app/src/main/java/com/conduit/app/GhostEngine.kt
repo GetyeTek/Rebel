@@ -20,7 +20,7 @@ interface DictionaryDao {
     suspend fun getWordById(id: Int): String?
 }
 
-@Database(entities = [WordEntity::class], version = 1)
+@Database(entities = [WordEntity::class], version = 1, exportSchema = false)
 abstract class GhostDatabase : RoomDatabase() {
     abstract fun dictionaryDao(): DictionaryDao
 }
@@ -44,7 +44,7 @@ class GhostSqueezer(private val dao: DictionaryDao) {
             val wordId = wordToIdMap[word]
             if (wordId != null) {
                 // Varint encoding
-                var v = wordId
+                var v: Int = wordId
                 while (v >= 0x80) {
                     output.add(((v and 0x7F) or 0x80).toByte())
                     v = v ushr 7
