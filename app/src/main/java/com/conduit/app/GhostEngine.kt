@@ -95,11 +95,10 @@ class GhostSqueezer(private val dao: DictionaryDao) {
                     currentByte = bytes[i].toInt() and 0xFF
                     value = value or ((currentByte and 0x7F) shl shift)
                     shift += 7
-                    if (currentByte >= 0x80) i++
+                    i++
                 } while (currentByte >= 0x80 && i < bytes.size)
                 val word = dao.getWordById(value)
                 sb.append(word ?: "?").append(" ")
-                i++
             }
         }
         return sb.toString().trim()
