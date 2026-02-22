@@ -23,13 +23,16 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 class MainActivity : ComponentActivity() {
     private val client = OkHttpClient.Builder()
+        .connectionPool(ConnectionPool(1, 5, java.util.concurrent.TimeUnit.MINUTES))
+        .dispatcher(Dispatcher().apply { maxRequestsPerHost = 1 })
         .addNetworkInterceptor { chain ->
             val original = chain.request()
             val stripped = original.newBuilder()
                 .removeHeader("User-Agent")
                 .removeHeader("Accept-Language")
-                .header("Connection", "close") // Critical for leaking SIMs to avoid keep-alive overhead
-                .header("Accept-Encoding", "identity") // Don't let server add extra encoding
+                .header("Connection", "keep-alive")
+                .header("Keep-Alive", "timeout=300")
+                .header("Accept-Encoding", "identity")
                 .build()
             chain.proceed(stripped)
         }
@@ -143,8 +146,6 @@ class MainActivity : ComponentActivity() {
 
     private fun sendBurst(data: ByteArray) {
         val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-handler"
-        
-        // PROTOCOL: [UID] + [DATA]
         val packet = ByteArray(data.size + 1)
         packet[0] = uid
         System.arraycopy(data, 0, packet, 1, data.size)
@@ -152,12 +153,37 @@ class MainActivity : ComponentActivity() {
         val request = Request.Builder()
             .url(url)
             .addHeader("Authorization", "Bearer $SUPABASE_KEY")
-            .post(packet.toRequestBody(null))
+            .addHeader("Content-Type", "application/octet-stream")
+            .post(packet.toRequestBody("application/octet-stream".toMediaType()))
             .build()
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: java.io.IOException) {}
-            override fun onResponse(call: Call, response: Response) { response.close() }
+            override fun onResponse(call: Call, response: Response) { 
+                // Consume body to allow connection reuse
+                response.body?.source()?.skip(Long.MAX_VALUE)
+                response.close() 
+            }
         })
+    }
+
+    // HIGH-EFFICIENCY UDP MODE (NTP DISGUISE)
+    private fun sendGhostUdp(data: ByteArray, serverIp: String) {
+        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val socket = java.net.DatagramSocket()
+                val address = java.net.InetAddress.getByName(serverIp)
+                
+                // NTP Header (48 bytes) + Ghost Payload
+                val ntpPacket = ByteArray(48 + data.size + 1)
+                ntpPacket[0] = 0x1B // LI = 0, VN = 3, Mode = 3 (Client)
+                ntpPacket[48] = uid
+                System.arraycopy(data, 0, ntpPacket, 49, data.size)
+                
+                val packet = java.net.DatagramPacket(ntpPacket, ntpPacket.size, address, 123)
+                socket.send(packet)
+                socket.close()
+            } catch (e: Exception) { e.printStackTrace() }
+        }
     }
 }
