@@ -22,7 +22,6 @@ interface DictionaryDao {
 
 @Database(entities = [WordEntity::class], version = 1, exportSchema = false)
 abstract class GhostDatabase : RoomDatabase() {
-    abstract fun dictionaryDao(): DictionaryDao
 }
 
 class GhostSqueezer(private val dao: DictionaryDao) {
@@ -50,7 +49,6 @@ class GhostSqueezer(private val dao: DictionaryDao) {
                     v = v ushr 7
                 }
                 output.add(v.toByte())
-            } else {
                 // Literal fallback
                 output.add(0.toByte())
                 val raw = word.toByteArray(Charsets.UTF_8)
