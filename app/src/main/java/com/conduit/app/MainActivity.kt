@@ -24,12 +24,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class MainActivity : ComponentActivity() {
     private val client = OkHttpClient.Builder()
         .addNetworkInterceptor { chain ->
-            // STRIP HEADERS TO THE ABSOLUTE LIMIT
             val original = chain.request()
             val stripped = original.newBuilder()
                 .removeHeader("User-Agent")
                 .removeHeader("Accept-Language")
-                .removeHeader("Connection")
+                .header("Connection", "close") // Critical for leaking SIMs to avoid keep-alive overhead
+                .header("Accept-Encoding", "identity") // Don't let server add extra encoding
                 .build()
             chain.proceed(stripped)
         }
