@@ -38,7 +38,6 @@ class MainActivity : ComponentActivity() {
     private val uid = (0..254).random().toByte()
     private lateinit var db: GhostDatabase
     private lateinit var squeezer: GhostSqueezer
-    private var webSocket: WebSocket? = null
     private val SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2bGRmc214c2toZW1rc2xzYnltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2ODgxNzksImV4cCI6MjA3ODI2NDE3OX0.5arqrx8Tt7v-hpXpo_ncoK4IX8th9IibxAuv93SSoOU"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -141,56 +140,9 @@ class MainActivity : ComponentActivity() {
             }
         })
     }
-    }
-
-    private fun initGhostEar(onMsg: (String) -> Unit) {
-        val wsUrl = "wss://xvldfsmxskhemkslsbym.supabase.co/realtime/v1/websocket?apikey=$SUPABASE_KEY&vsn=1.0.0"
-        val request = Request.Builder().url(wsUrl).build()
-        
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                // Join the ghost_stream channel
-                val joinMsg = "{\"topic\":\"realtime:public:ghost_stream\",\"event\":\"phx_join\",\"payload\":{},\"ref\":\"1\"}"
-                webSocket.send(joinMsg)
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                // Supabase Realtime sends JSON. We extract the payload.
-                if (text.contains("\"event\":\"INSERT\"")) {
-                    try {
-                        val rawPayload = text.substringAfter("\"payload\":\\\"\\\\x").substringBefore("\\\"")
-                        val bytes = rawPayload.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-                        
-                        kotlinx.coroutines.MainScope().launch {
-                            val decrypted = squeezer.decompress(bytes)
-                            onMsg("RX: $decrypted")
-                        }
-                    } catch (e: Exception) {
-                        // Handle parse error
-                    }
-                }
-                
-                // Handle Heartbeat to stay alive
-                if (text.contains("phx_reply")) {
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        webSocket.send("{\"topic\":\"phoenix\",\"event\":\"heartbeat\",\"payload\":{},\"ref\":\"h\"}")
-                    }, 30000)
-                }
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ initGhostEar(onMsg) }, 5000)
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ initGhostEar(onMsg) }, 5000)
-            }
-        })
-    }
 
     private fun sendBurst(data: ByteArray) {
         val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-handler"
-        val key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2bGRmc214c2toZW1rc2xzYnltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2ODgxNzksImV4cCI6MjA3ODI2NDE3OX0.5arqrx8Tt7v-hpXpo_ncoK4IX8th9IibxAuv93SSoOU"
         
         // PROTOCOL: [UID] + [DATA]
         val packet = ByteArray(data.size + 1)
@@ -199,8 +151,7 @@ class MainActivity : ComponentActivity() {
 
         val request = Request.Builder()
             .url(url)
-            .addHeader("Authorization", "Bearer $key")
-            // We use null media type to prevent OkHttp from adding Content-Type/Length headers if possible
+            .addHeader("Authorization", "Bearer $SUPABASE_KEY")
             .post(packet.toRequestBody(null))
             .build()
 
