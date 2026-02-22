@@ -52,20 +52,44 @@ class MainActivity : ComponentActivity() {
         squeezer = GhostSqueezer(db.dictionaryDao())
 
         setContent {
-            var logs by remember { mutableStateOf(listOf("GHOST-READY")) }
+            var logs by remember { mutableStateOf(listOf<String>()) }
+            var debugLogs = remember { mutableStateListOf<String>() }
+            var showDebug by remember { mutableStateOf(false) }
             var input by remember { mutableStateOf("") }
             val scope = rememberCoroutineScope()
 
+            fun dLog(msg: String) {
+                val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+                debugLogs.add(0, "[$time] $msg")
+            }
+
             Column(modifier = Modifier.fillMaxSize().background(Color(0xFF020202)).padding(16.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("CONDUIT // GHOST-MODE", color = Color(0xFF00FF41), fontSize = 12.sp)
-                    androidx.compose.material3.TextButton(onClick = {
-                        scope.launch { 
-                            wipeBurst()
-                            logs = listOf("SESSION CLEARED")
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column {
+                        Text("CONDUIT // GHOST-MODE", color = Color(0xFF00FF41), fontSize = 12.sp)
+                        Text("UID: ${uid.toInt() and 0xFF}", color = Color(0xFF004411), fontSize = 8.sp)
+                    }
+                    Row {
+                        androidx.compose.material3.TextButton(onClick = { showDebug = !showDebug }) {
+                            Text(if(showDebug) "HIDE LOGS" else "DEBUG", color = Color.Yellow, fontSize = 10.sp)
                         }
-                    }) {
-                        Text("WIPE SESSION", color = Color.Red, fontSize = 10.sp)
+                        androidx.compose.material3.TextButton(onClick = {
+                            scope.launch { 
+                                dLog("SYS: INITIATING REMOTE WIPE")
+                                wipeBurst { dLog("SYS: WIPE COMPLETE") }
+                                logs = listOf("SESSION CLEARED")
+                            }
+                        }) {
+                            Text("WIPE", color = Color.Red, fontSize = 10.sp)
+                        }
+                    }
+                }
+
+                if (showDebug) {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().height(200.dp).background(Color(0xEE050505)).padding(4.dp)) {
+                        items(debugLogs) { line ->
+                            Text(line, color = if(line.contains("ERR")) Color.Red else Color.Cyan, fontSize = 10.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        }
                     }
                 }
                 
@@ -86,11 +110,14 @@ class MainActivity : ComponentActivity() {
                     androidx.compose.material3.Button(
                         onClick = {
                             val textToSend = input
+                            if (textToSend.isBlank()) return@Button
                             input = ""
                             scope.launch {
+                                dLog("TX: RAW_LEN=${textToSend.length}")
                                 val compressed = squeezer.compress(textToSend)
-                                sendBurst(compressed)
-                                logs = logs + "> SENT [${compressed.size}b]"
+                                dLog("TX: SQZ_LEN=${compressed.size} (RATIO: ${String.format("%.1f", compressed.size.toFloat()/textToSend.length*100)}%)")
+                                sendBurst(compressed, ::dLog)
+                                logs = logs + "> $textToSend"
                             }
                         },
                         modifier = Modifier.padding(start = 4.dp)
@@ -98,7 +125,10 @@ class MainActivity : ComponentActivity() {
 
                     androidx.compose.material3.Button(
                         onClick = {
-                            fetchBurst { incoming -> logs = logs + "RX: $incoming" }
+                            dLog("RX: POLLING SUPABASE...")
+                            fetchBurst(::dLog) { incoming -> 
+                                logs = logs + "RX: $incoming" 
+                            }
                         },
                         modifier = Modifier.padding(start = 4.dp)
                     ) { Text("FETCH") }
@@ -107,7 +137,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun wipeBurst() {
+    private fun wipeBurst(onDone: () -> Unit) {
         val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-wipe"
         val request = Request.Builder()
             .url(url)
@@ -115,12 +145,15 @@ class MainActivity : ComponentActivity() {
             .post("".toRequestBody(null))
             .build()
         client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {}
-            override fun onResponse(call: Call, response: Response) { response.close() }
+            override fun onFailure(call: Call, e: java.io.IOException) { }
+            override fun onResponse(call: Call, response: Response) { 
+                response.close()
+                runOnUiThread { onDone() }
+            }
         })
     }
 
-    private fun fetchBurst(onMsg: (String) -> Unit) {
+    private fun fetchBurst(dLog: (String) -> Unit, onMsg: (String) -> Unit) {
         val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-pull"
         val request = Request.Builder()
             .url(url)
@@ -129,13 +162,20 @@ class MainActivity : ComponentActivity() {
             .build()
 
         client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {}
+            override fun onFailure(call: Call, e: java.io.IOException) {
+                runOnUiThread { dLog("RX-ERR: ${e.message}") }
+            }
             override fun onResponse(call: Call, response: Response) {
-                response.body?.bytes()?.let { compressed ->
-                    if (compressed.isNotEmpty()) {
-                        kotlinx.coroutines.MainScope().launch {
-                            val decrypted = squeezer.decompress(compressed)
-                            onMsg(decrypted)
+                val code = response.code
+                val bodyBytes = response.body?.bytes() ?: byteArrayOf()
+                runOnUiThread { dLog("RX-RES: HTTP $code | BODY=${bodyBytes.size}b") }
+                
+                if (bodyBytes.isNotEmpty()) {
+                    kotlinx.coroutines.MainScope().launch {
+                        val decrypted = squeezer.decompress(bodyBytes)
+                        runOnUiThread { 
+                            dLog("RX-DEC: SUCCESS")
+                            onMsg(decrypted) 
                         }
                     }
                 }
@@ -144,7 +184,7 @@ class MainActivity : ComponentActivity() {
         })
     }
 
-    private fun sendBurst(data: ByteArray) {
+    private fun sendBurst(data: ByteArray, dLog: (String) -> Unit) {
         val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-handler"
         val packet = ByteArray(data.size + 1)
         packet[0] = uid
@@ -157,10 +197,14 @@ class MainActivity : ComponentActivity() {
             .post(packet.toRequestBody("application/octet-stream".toMediaType()))
             .build()
 
+        dLog("TX-REQ: POST ${packet.size}b")
         client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {}
+            override fun onFailure(call: Call, e: java.io.IOException) {
+                runOnUiThread { dLog("TX-ERR: ${e.message}") }
+            }
             override fun onResponse(call: Call, response: Response) { 
-                // Consume body to allow connection reuse
+                val code = response.code
+                runOnUiThread { dLog("TX-RES: HTTP $code") }
                 response.body?.source()?.skip(Long.MAX_VALUE)
                 response.close() 
             }
