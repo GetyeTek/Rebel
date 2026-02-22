@@ -18,9 +18,6 @@ interface DictionaryDao {
 
     @Query("SELECT word FROM dictionary WHERE id = :id LIMIT 1")
     suspend fun getWordById(id: Int): String?
-
-    @Query("DELETE FROM dictionary")
-    suspend fun nukeDictionary()
 }
 
 @Database(entities = [WordEntity::class], version = 1)
