@@ -22,6 +22,7 @@ interface DictionaryDao {
 
 @Database(entities = [WordEntity::class], version = 1, exportSchema = false)
 abstract class GhostDatabase : RoomDatabase() {
+    abstract fun dictionaryDao(): DictionaryDao
 }
 
 class GhostSqueezer(private val dao: DictionaryDao) {
@@ -41,15 +42,16 @@ class GhostSqueezer(private val dao: DictionaryDao) {
         // 2. Process tokens using the map
         for (word in tokens) {
             val wordId = wordToIdMap[word]
-            if (wordId != null) {
-                // Varint encoding
+            if (wordId != null && wordId > 0) {
+                // Varint encoding for known words
                 var v: Int = wordId
                 while (v >= 0x80) {
                     output.add(((v and 0x7F) or 0x80).toByte())
                     v = v ushr 7
                 }
                 output.add(v.toByte())
-                // Literal fallback
+            } else {
+                // Literal fallback for unknown words (prefixed with 0)
                 output.add(0.toByte())
                 val raw = word.toByteArray(Charsets.UTF_8)
                 output.add(raw.size.coerceAtMost(255).toByte())
