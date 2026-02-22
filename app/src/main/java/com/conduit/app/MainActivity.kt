@@ -59,11 +59,11 @@ class MainActivity : ComponentActivity() {
                     Text("CONDUIT // GHOST-MODE", color = Color(0xFF00FF41), fontSize = 12.sp)
                     androidx.compose.material3.TextButton(onClick = {
                         scope.launch { 
-                            db.dictionaryDao().nukeDictionary()
-                            logs = listOf("SYSTEM WIPED PERMANENTLY")
+                            wipeBurst()
+                            logs = listOf("SESSION CLEARED")
                         }
                     }) {
-                        Text("WIPE", color = Color.Red, fontSize = 10.sp)
+                        Text("WIPE SESSION", color = Color.Red, fontSize = 10.sp)
                     }
                 }
                 
@@ -103,6 +103,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun wipeBurst() {
+        val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-wipe"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $SUPABASE_KEY")
+            .post("".toRequestBody(null))
+            .build()
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: java.io.IOException) {}
+            override fun onResponse(call: Call, response: Response) { response.close() }
+        })
     }
 
     private fun fetchBurst(onMsg: (String) -> Unit) {
