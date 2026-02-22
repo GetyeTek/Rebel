@@ -43,7 +43,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        db = Room.databaseBuilder(applicationContext, GhostDatabase::class.java, "ghost-db").build()
+        db = Room.databaseBuilder(applicationContext, GhostDatabase::class.java, "ghost-db")
+            .createFromAsset("ghost_dict.db")
+            .fallbackToDestructiveMigration()
+            .build()
         squeezer = GhostSqueezer(db.dictionaryDao())
 
         setContent {
