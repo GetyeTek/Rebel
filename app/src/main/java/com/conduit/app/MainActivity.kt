@@ -50,12 +50,22 @@ class MainActivity : ComponentActivity() {
         squeezer = GhostSqueezer(db.dictionaryDao())
 
         setContent {
-            var logs by remember { mutableStateOf(listOf("GHOST-PROTOCOL INITIALIZED")) }
+            var logs by remember { mutableStateOf(listOf("GHOST-READY")) }
             var input by remember { mutableStateOf("") }
             val scope = rememberCoroutineScope()
 
             Column(modifier = Modifier.fillMaxSize().background(Color(0xFF020202)).padding(16.dp)) {
-                Text("CONDUIT // ABSOLUTE LIMIT", color = Color(0xFF00FF41), fontSize = 12.sp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("CONDUIT // GHOST-MODE", color = Color(0xFF00FF41), fontSize = 12.sp)
+                    androidx.compose.material3.TextButton(onClick = {
+                        scope.launch { 
+                            db.dictionaryDao().nukeDictionary()
+                            logs = listOf("SYSTEM WIPED PERMANENTLY")
+                        }
+                    }) {
+                        Text("WIPE", color = Color.Red, fontSize = 10.sp)
+                    }
+                }
                 
                 LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     items(logs) { log ->
@@ -68,11 +78,7 @@ class MainActivity : ComponentActivity() {
                         value = input,
                         onValueChange = { input = it },
                         textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
-                        modifier = Modifier.weight(1f).background(Color(0xFF111111)).padding(12.dp),
-                        decorationBox = { innerTextField ->
-                            if (input.isEmpty()) Text("CMD...", color = Color.Gray)
-                            innerTextField()
-                        }
+                        modifier = Modifier.weight(1f).background(Color(0xFF111111)).padding(12.dp)
                     )
                     
                     androidx.compose.material3.Button(
@@ -82,20 +88,46 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 val compressed = squeezer.compress(textToSend)
                                 sendBurst(compressed)
-                                logs = logs + "> $textToSend [${compressed.size}b]"
+                                logs = logs + "> SENT [${compressed.size}b]"
                             }
                         },
-                        modifier = Modifier.padding(start = 8.dp)
+                        modifier = Modifier.padding(start = 4.dp)
                     ) { Text("SEND") }
-                }
-            }
-            
-            LaunchedEffect(Unit) {
-                initGhostEar { incoming ->
-                    logs = logs + incoming
+
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            fetchBurst { incoming -> logs = logs + "RX: $incoming" }
+                        },
+                        modifier = Modifier.padding(start = 4.dp)
+                    ) { Text("FETCH") }
                 }
             }
         }
+    }
+
+    private fun fetchBurst(onMsg: (String) -> Unit) {
+        val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-pull"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $SUPABASE_KEY")
+            .post("".toRequestBody(null))
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: java.io.IOException) {}
+            override fun onResponse(call: Call, response: Response) {
+                response.body?.bytes()?.let { compressed ->
+                    if (compressed.isNotEmpty()) {
+                        kotlinx.coroutines.MainScope().launch {
+                            val decrypted = squeezer.decompress(compressed)
+                            onMsg(decrypted)
+                        }
+                    }
+                }
+                response.close()
+            }
+        })
+    }
     }
 
     private fun initGhostEar(onMsg: (String) -> Unit) {
