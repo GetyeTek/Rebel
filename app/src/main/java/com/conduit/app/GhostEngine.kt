@@ -1,14 +1,18 @@
 package com.conduit.app
 
 import androidx.room.*
+import androidx.room.Index
 import java.util.zip.Deflater
 import java.util.zip.Inflater
 import java.io.ByteArrayOutputStream
 
-@Entity(tableName = "dictionary")
+@Entity(
+    tableName = "dictionary",
+    indices = [Index(value = ["word"], name = "idx_word")]
+)
 data class WordEntity(
-    @PrimaryKey val id: Int,
-    val word: String
+    @PrimaryKey val id: Int?,
+    val word: String?
 )
 
 @Dao
@@ -36,7 +40,11 @@ class GhostSqueezer(private val dao: DictionaryDao) {
         
         uniqueWords.chunked(500).forEach { chunk ->
             val results = dao.getWordsByList(chunk)
-            results.forEach { wordToIdMap[it.word] = it.id }
+            results.forEach { 
+                if (it.word != null && it.id != null) {
+                    wordToIdMap[it.word] = it.id
+                }
+            }
         }
 
         // 2. Process tokens using the map
