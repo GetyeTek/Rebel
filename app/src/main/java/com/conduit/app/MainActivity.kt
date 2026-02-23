@@ -36,6 +36,26 @@ class MainActivity : ComponentActivity() {
     private var activePhase by mutableStateOf("IDLE")
     private var liveSpeedUp by mutableLongStateOf(0L)
     private var liveSpeedDown by mutableLongStateOf(0L)
+    
+    // Promoted State
+    private val debugLogs = mutableStateListOf<String>()
+    private var logs by mutableStateOf(listOf<String>())
+
+    private fun storeLog(msg: String) {
+        try {
+            val file = java.io.File(filesDir, "ghost.log")
+            file.appendText("\n" + msg)
+        } catch (e: Exception) {}
+    }
+
+    fun dLog(msg: String) {
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        val formatted = "[$time] $msg"
+        runOnUiThread {
+            debugLogs.add(0, formatted)
+        }
+        storeLog(formatted)
+    }
 
     private val client = OkHttpClient.Builder()
         .dns(object : Dns {
@@ -89,13 +109,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var squeezer: GhostSqueezer
     private val SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2bGRmc214c2toZW1rc2xzYnltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2ODgxNzksImV4cCI6MjA3ODI2NDE3OX0.5arqrx8Tt7v-hpXpo_ncoK4IX8th9IibxAuv93SSoOU"
 
-        private fun storeLog(msg: String) {
-        try {
-            val file = java.io.File(filesDir, "ghost.log")
-            file.appendText("\n" + msg)
-        } catch (e: Exception) {}
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -113,8 +126,6 @@ class MainActivity : ComponentActivity() {
         squeezer = GhostSqueezer(db.dictionaryDao())
 
         setContent {
-            var logs by remember { mutableStateOf(listOf<String>()) }
-            var debugLogs = remember { mutableStateListOf<String>() }
             var showDebug by remember { mutableStateOf(false) }
 
             LaunchedEffect(Unit) {
@@ -126,12 +137,6 @@ class MainActivity : ComponentActivity() {
                 } catch (e: Exception) {}
             }
 
-            fun dLog(msg: String) {
-                val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
-                val formatted = "[$time] $msg"
-                debugLogs.add(0, formatted)
-                storeLog(formatted)
-            }
             var input by remember { mutableStateOf("") }
             val scope = rememberCoroutineScope()
 
