@@ -31,6 +31,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
 class MainActivity : ComponentActivity() {
+    private val GHOST_IP = "172.67.135.158"
     private var cachedIp: String? = null
     private var activePhase by mutableStateOf("IDLE")
     private var liveSpeedUp by mutableLongStateOf(0L)
@@ -48,8 +49,9 @@ class MainActivity : ComponentActivity() {
                     }
                     addresses
                 } catch (e: java.net.UnknownHostException) {
-                    val fallback = getSharedPreferences("ghost", 0).getString("last_ip", null)
-                    if (hostname.contains("supabase") && fallback != null) {
+                    val fallback = getSharedPreferences("ghost", 0).getString("last_ip", GHOST_IP)
+                    if (hostname.contains("supabase")) {
+                        dLog("DNS-BYPASS: USING $fallback")
                         listOf(java.net.InetAddress.getByName(fallback))
                     } else throw e
                 }
