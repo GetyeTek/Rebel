@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -32,6 +34,7 @@ class MainActivity : ComponentActivity() {
     private var liveSpeedDown by mutableLongStateOf(0L)
 
     private val client = OkHttpClient.Builder()
+        .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
         .eventListener(object : EventListener() {
             override fun dnsStart(call: Call, domainName: String) { activePhase = "DNS: $domainName" }
             override fun connectStart(call: Call, inetSocketAddress: java.net.InetSocketAddress, proxy: java.net.Proxy) { activePhase = "TCP: CONNECTING" }
