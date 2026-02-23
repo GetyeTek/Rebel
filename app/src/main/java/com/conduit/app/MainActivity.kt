@@ -193,10 +193,16 @@ class MainActivity : ComponentActivity() {
                                 try {
                                     dLog("TX: RAW_LEN=${textToSend.length}")
                                     val compressed = squeezer.compress(textToSend)
+                                    val startTime = System.currentTimeMillis()
                                     dLog("TX: SQZ_LEN=${compressed.size} (RATIO: ${String.format("%.1f", compressed.size.toFloat()/textToSend.length*100)}%)")
-                                    sendBurst(compressed, ::dLog)
-                                    withContext(Dispatchers.Main) {
-                                        logs = logs + "> $textToSend"
+                                    val success = sendBurstSync(compressed, ::dLog)
+                                    val duration = System.currentTimeMillis() - startTime
+                                    if (success) {
+                                        withContext(Dispatchers.Main) {
+                                            logs = logs + "> $textToSend [${duration}ms]"
+                                        }
+                                    } else {
+                                        dLog("TX-FAIL: Server dropped packet")
                                     }
                                 } catch (e: Exception) {
                                     dLog("TX-ERR: ${e.message}")
@@ -270,7 +276,7 @@ class MainActivity : ComponentActivity() {
         })
     }
 
-    private fun sendBurst(data: ByteArray, dLog: (String) -> Unit) {
+    private fun sendBurstSync(data: ByteArray, dLog: (String) -> Unit): Boolean {
         val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-handler"
         val packet = ByteArray(data.size + 1)
         packet[0] = uid
@@ -283,18 +289,16 @@ class MainActivity : ComponentActivity() {
             .post(packet.toRequestBody("application/octet-stream".toMediaType()))
             .build()
 
-        dLog("TX-REQ: POST ${packet.size}b")
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {
-                runOnUiThread { dLog("TX-ERR: ${e.message}") }
+        return try {
+            dLog("TX-REQ: ${packet.size}b")
+            client.newCall(request).execute().use { response ->
+                dLog("TX-RES: HTTP ${response.code}")
+                response.isSuccessful
             }
-            override fun onResponse(call: Call, response: Response) { 
-                val code = response.code
-                runOnUiThread { dLog("TX-RES: HTTP $code") }
-                response.body?.source()?.skip(Long.MAX_VALUE)
-                response.close() 
-            }
-        })
+        } catch (e: Exception) {
+            dLog("TX-ERR: ${e.message}")
+            false
+        }
     }
 
     // HIGH-EFFICIENCY UDP MODE (NTP DISGUISE)
