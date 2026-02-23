@@ -31,7 +31,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
 class MainActivity : ComponentActivity() {
-    private val GHOST_IP = "172.67.135.158"
+    private val GHOST_IPS = listOf("172.67.135.158", "104.21.33.10", "162.159.36.1", "108.162.192.1")
+    private var currentIpIndex = 0
     private var cachedIp: String? = null
     private var activePhase by mutableStateOf("IDLE")
     private var liveSpeedUp by mutableLongStateOf(0L)
@@ -71,9 +72,9 @@ class MainActivity : ComponentActivity() {
                     }
                     addresses
                 } catch (e: java.net.UnknownHostException) {
-                    val fallback = getSharedPreferences("ghost", 0).getString("last_ip", GHOST_IP)
+                    val fallback = GHOST_IPS[currentIpIndex]
                     if (hostname.contains("supabase")) {
-                        dLog("DNS-BYPASS: USING $fallback")
+                        dLog("DNS-BYPASS: TARGETING $fallback")
                         listOf(java.net.InetAddress.getByName(fallback))
                     } else throw e
                 }
@@ -240,25 +241,37 @@ class MainActivity : ComponentActivity() {
                                 try {
                                     dLog("TX: RAW_LEN=${textToSend.length}")
                                     val compressed = squeezer.compress(textToSend)
+                                    dLog("TX: SQZ_LEN=${compressed.size}")
+                                    
+                                    // START STEALTH ENGINE
+                                    var success = false
+                                    var attempt = 1
                                     val startTime = System.currentTimeMillis()
-                                    dLog("TX: SQZ_LEN=${compressed.size} (RATIO: ${String.format("%.1f", compressed.size.toFloat()/textToSend.length*100)}%)")
-                                    val success = sendBurstSync(compressed, ::dLog)
-                                    val duration = System.currentTimeMillis() - startTime
+                                    
+                                    while (!success && attempt <= 5) {
+                                        activePhase = "HUNTING (ATMPT $attempt)"
+                                        success = sendBurstSync(compressed, ::dLog)
+                                        if (!success) {
+                                            currentIpIndex = (currentIpIndex + 1) % GHOST_IPS.size
+                                            dLog("STEALTH: ROTATING TO IP ${GHOST_IPS[currentIpIndex]}")
+                                            kotlinx.coroutines.delay(2000L * attempt)
+                                        }
+                                        attempt++
+                                    }
+
                                     if (success) {
+                                        val duration = System.currentTimeMillis() - startTime
                                         withContext(Dispatchers.Main) {
                                             logs = logs + "> $textToSend [${duration}ms]"
                                         }
                                     } else {
-                                        dLog("TX-FAIL: Server dropped packet")
+                                        dLog("STEALTH: ALL CONDUITS BLOCKED")
                                     }
                                 } catch (e: Exception) {
-                                    dLog("TX-ERR: ${e.message}")
-                                    e.printStackTrace()
+                                    dLog("STEALTH-FATAL: ${e.message}")
                                 }
                             }
                         },
-                        modifier = Modifier.padding(start = 4.dp)
-                    ) { Text("SEND") }
 
                     androidx.compose.material3.Button(
                         onClick = {
