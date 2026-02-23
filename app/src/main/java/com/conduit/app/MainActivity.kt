@@ -128,11 +128,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            fun dLog(msg: String) {
-                val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
-                debugLogs.add(0, "[$time] $msg")
-            }
-
             Column(modifier = Modifier.fillMaxSize().background(Color(0xFF020202)).padding(16.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Column {
