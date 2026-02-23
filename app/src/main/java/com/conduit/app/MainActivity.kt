@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.room.Room
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -43,8 +45,23 @@ class MainActivity : ComponentActivity() {
     private lateinit var squeezer: GhostSqueezer
     private val SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2bGRmc214c2toZW1rc2xzYnltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2ODgxNzksImV4cCI6MjA3ODI2NDE3OX0.5arqrx8Tt7v-hpXpo_ncoK4IX8th9IibxAuv93SSoOU"
 
+        private fun storeLog(msg: String) {
+        try {
+            val file = java.io.File(filesDir, "ghost.log")
+            file.appendText("\n" + msg)
+        } catch (e: Exception) {}
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // CRASH HANDLER: Save trace to disk before dying
+        val oldHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            storeLog("FATAL: ${throwable.message}\n${throwable.stackTraceToString()}")
+            oldHandler?.uncaughtException(thread, throwable)
+        }
+
         db = Room.databaseBuilder(applicationContext, GhostDatabase::class.java, "ghost-db")
             .createFromAsset("ghost_dict.db")
             .fallbackToDestructiveMigration()
@@ -55,6 +72,22 @@ class MainActivity : ComponentActivity() {
             var logs by remember { mutableStateOf(listOf<String>()) }
             var debugLogs = remember { mutableStateListOf<String>() }
             var showDebug by remember { mutableStateOf(false) }
+
+            LaunchedEffect(Unit) {
+                try {
+                    val logFile = java.io.File(filesDir, "ghost.log")
+                    if (logFile.exists()) {
+                        logFile.readLines().takeLast(50).forEach { debugLogs.add(0, it) }
+                    }
+                } catch (e: Exception) {}
+            }
+
+            fun dLog(msg: String) {
+                val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+                val formatted = "[$time] $msg"
+                debugLogs.add(0, formatted)
+                storeLog(formatted)
+            }
             var input by remember { mutableStateOf("") }
             val scope = rememberCoroutineScope()
 
@@ -112,12 +145,19 @@ class MainActivity : ComponentActivity() {
                             val textToSend = input
                             if (textToSend.isBlank()) return@Button
                             input = ""
-                            scope.launch {
-                                dLog("TX: RAW_LEN=${textToSend.length}")
-                                val compressed = squeezer.compress(textToSend)
-                                dLog("TX: SQZ_LEN=${compressed.size} (RATIO: ${String.format("%.1f", compressed.size.toFloat()/textToSend.length*100)}%)")
-                                sendBurst(compressed, ::dLog)
-                                logs = logs + "> $textToSend"
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    dLog("TX: RAW_LEN=${textToSend.length}")
+                                    val compressed = squeezer.compress(textToSend)
+                                    dLog("TX: SQZ_LEN=${compressed.size} (RATIO: ${String.format("%.1f", compressed.size.toFloat()/textToSend.length*100)}%)")
+                                    sendBurst(compressed, ::dLog)
+                                    withContext(Dispatchers.Main) {
+                                        logs = logs + "> $textToSend"
+                                    }
+                                } catch (e: Exception) {
+                                    dLog("TX-ERR: ${e.message}")
+                                    e.printStackTrace()
+                                }
                             }
                         },
                         modifier = Modifier.padding(start = 4.dp)
@@ -125,9 +165,11 @@ class MainActivity : ComponentActivity() {
 
                     androidx.compose.material3.Button(
                         onClick = {
-                            dLog("RX: POLLING SUPABASE...")
-                            fetchBurst(::dLog) { incoming -> 
-                                logs = logs + "RX: $incoming" 
+                            dLog("RX: POLLING...")
+                            scope.launch(Dispatchers.IO) {
+                                fetchBurst(::dLog) { incoming -> 
+                                    kotlinx.coroutines.MainScope().launch { logs = logs + "RX: $incoming" }
+                                }
                             }
                         },
                         modifier = Modifier.padding(start = 4.dp)
