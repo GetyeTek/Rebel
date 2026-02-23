@@ -83,7 +83,9 @@ class GhostSqueezer(private val dao: DictionaryDao) {
         while (i < bytes.size) {
             val b = bytes[i].toInt() and 0xFF
             if (b == 0) {
+                if (i + 1 >= bytes.size) break
                 val len = bytes[i + 1].toInt() and 0xFF
+                if (i + 2 + len > bytes.size) break
                 val wordBytes = bytes.copyOfRange(i + 2, i + 2 + len)
                 sb.append(String(wordBytes, Charsets.UTF_8)).append(" ")
                 i += 2 + len
