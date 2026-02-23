@@ -234,10 +234,10 @@ class MainActivity : ComponentActivity() {
 
                     androidx.compose.material3.Button(
                         onClick = {
-                            dLog("RX: POLLING...")
+                            dLog("RX: MANUAL_FETCH...")
                             scope.launch(Dispatchers.IO) {
-                                fetchBurst(::dLog) { incoming -> 
-                                    kotlinx.coroutines.MainScope().launch { logs = logs + "RX: $incoming" }
+                                fetchBurstSync(::dLog) { incoming -> 
+                                    scope.launch(Dispatchers.Main) { logs = logs + "RX: $incoming" }
                                 }
                             }
                         },
