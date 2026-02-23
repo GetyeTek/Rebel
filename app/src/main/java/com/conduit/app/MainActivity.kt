@@ -31,11 +31,30 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
 class MainActivity : ComponentActivity() {
+    private var cachedIp: String? = null
     private var activePhase by mutableStateOf("IDLE")
     private var liveSpeedUp by mutableLongStateOf(0L)
     private var liveSpeedDown by mutableLongStateOf(0L)
 
     private val client = OkHttpClient.Builder()
+        .dns(object : Dns {
+            override fun lookup(hostname: String): List<java.net.InetAddress> {
+                return try {
+                    val addresses = Dns.SYSTEM.lookup(hostname)
+                    // Cache the first successful IP for Ghost-Mode fallback
+                    if (hostname.contains("supabase")) {
+                        cachedIp = addresses.firstOrNull()?.hostAddress
+                        getSharedPreferences("ghost", 0).edit().putString("last_ip", cachedIp).apply()
+                    }
+                    addresses
+                } catch (e: java.net.UnknownHostException) {
+                    val fallback = getSharedPreferences("ghost", 0).getString("last_ip", null)
+                    if (hostname.contains("supabase") && fallback != null) {
+                        listOf(java.net.InetAddress.getByName(fallback))
+                    } else throw e
+                }
+            }
+        })
         .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
         .eventListener(object : EventListener() {
             override fun dnsStart(call: Call, domainName: String) { activePhase = "DNS: $domainName" }
@@ -309,6 +328,11 @@ class MainActivity : ComponentActivity() {
             }
         } catch (e: Exception) {
             dLog("TX-ERR: ${e.message}")
+            val fallbackIp = getSharedPreferences("ghost", 0).getString("last_ip", "")
+            if (fallbackIp!!.isNotEmpty()) {
+                dLog("TX-GHOST: TRIGGERING UDP BURST TO $fallbackIp")
+                sendGhostUdp(data, fallbackIp)
+            }
             false
         }
     }
