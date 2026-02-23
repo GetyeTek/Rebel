@@ -241,9 +241,7 @@ class MainActivity : ComponentActivity() {
                                 try {
                                     dLog("TX: RAW_LEN=${textToSend.length}")
                                     val compressed = squeezer.compress(textToSend)
-                                    dLog("TX: SQZ_LEN=${compressed.size}")
                                     
-                                    // START STEALTH ENGINE
                                     var success = false
                                     var attempt = 1
                                     val startTime = System.currentTimeMillis()
@@ -252,11 +250,9 @@ class MainActivity : ComponentActivity() {
                                         val currentTarget = GHOST_IPS[currentIpIndex]
                                         activePhase = "HUNTING [$attempt/10] -> $currentTarget"
                                         
-                                        // Secondary Parallel UDP Thread: Fire after 5s of HTTPS struggle
                                         val udpJob = scope.launch(Dispatchers.IO) {
                                             delay(5000)
                                             if (!success) {
-                                                dLog("STEALTH: HTTPS SLOW - FIRING PARALLEL UDP")
                                                 sendGhostUdp(compressed, currentTarget)
                                             }
                                         }
@@ -267,7 +263,6 @@ class MainActivity : ComponentActivity() {
                                         if (!success) {
                                             currentIpIndex = (currentIpIndex + 1) % GHOST_IPS.size
                                             val waitTime = (attempt * 3).coerceAtMost(15)
-                                            dLog("STEALTH: COOLING DOWN (${waitTime}s)")
                                             for (i in waitTime downTo 1) {
                                                 activePhase = "RECOVERY ($i s)"
                                                 delay(1000)
@@ -281,14 +276,14 @@ class MainActivity : ComponentActivity() {
                                         withContext(Dispatchers.Main) {
                                             logs = logs + "> $textToSend [${duration}ms]"
                                         }
-                                    } else {
-                                        dLog("STEALTH: ALL CONDUITS BLOCKED")
                                     }
                                 } catch (e: Exception) {
                                     dLog("STEALTH-FATAL: ${e.message}")
                                 }
                             }
                         },
+                        modifier = Modifier.padding(start = 4.dp)
+                    ) { Text("SEND") }
 
                     androidx.compose.material3.Button(
                         onClick = {
