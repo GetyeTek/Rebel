@@ -117,6 +117,25 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 var lastUp = TrafficStats.getUidTxBytes(android.os.Process.myUid())
                 var lastDown = TrafficStats.getUidRxBytes(android.os.Process.myUid())
+                
+                // Background Polling Loop
+                launch(Dispatchers.IO) {
+                    while(true) {
+                        try {
+                            fetchBurstSync(::dLog) { incoming ->
+                                scope.launch(Dispatchers.Main) {
+                                    if (incoming.isNotEmpty()) {
+                                        logs = logs + "RX: $incoming"
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            dLog("POLL-ERR: ${e.message}")
+                        }
+                        delay(3000) // Poll every 3 seconds
+                    }
+                }
+
                 while(true) {
                     delay(1000)
                     val currUp = TrafficStats.getUidTxBytes(android.os.Process.myUid())
@@ -245,7 +264,7 @@ class MainActivity : ComponentActivity() {
         })
     }
 
-    private fun fetchBurst(dLog: (String) -> Unit, onMsg: (String) -> Unit) {
+        private suspend fun fetchBurstSync(dLog: (String) -> Unit, onMsg: (String) -> Unit) {
         val url = "https://xvldfsmxskhemkslsbym.supabase.co/functions/v1/ghost-pull"
         val request = Request.Builder()
             .url(url)
@@ -253,27 +272,20 @@ class MainActivity : ComponentActivity() {
             .post("".toRequestBody(null))
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {
-                runOnUiThread { dLog("RX-ERR: ${e.message}") }
-            }
-            override fun onResponse(call: Call, response: Response) {
-                val code = response.code
+        try {
+            client.newCall(request).execute().use { response ->
                 val bodyBytes = response.body?.bytes() ?: byteArrayOf()
-                runOnUiThread { dLog("RX-RES: HTTP $code | BODY=${bodyBytes.size}b") }
-                
                 if (bodyBytes.isNotEmpty()) {
-                    kotlinx.coroutines.MainScope().launch {
-                        val decrypted = squeezer.decompress(bodyBytes)
-                        runOnUiThread { 
-                            dLog("RX-DEC: SUCCESS")
-                            onMsg(decrypted) 
-                        }
+                    val decrypted = squeezer.decompress(bodyBytes)
+                    withContext(Dispatchers.Main) {
+                        dLog("RX-DATA: ${bodyBytes.size}b")
+                        onMsg(decrypted)
                     }
                 }
-                response.close()
             }
-        })
+        } catch (e: Exception) {
+            // Silent fail for polling to avoid log spamming
+        }
     }
 
     private fun sendBurstSync(data: ByteArray, dLog: (String) -> Unit): Boolean {
