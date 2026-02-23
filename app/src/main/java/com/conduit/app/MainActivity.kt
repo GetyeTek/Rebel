@@ -15,7 +15,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import android.net.TrafficStats
 import androidx.room.Room
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +27,22 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
 class MainActivity : ComponentActivity() {
+    private var activePhase by mutableStateOf("IDLE")
+    private var liveSpeedUp by mutableLongStateOf(0L)
+    private var liveSpeedDown by mutableLongStateOf(0L)
+
     private val client = OkHttpClient.Builder()
+        .eventListener(object : EventListener() {
+            override fun dnsStart(call: Call, domainName: String) { activePhase = "DNS: $domainName" }
+            override fun connectStart(call: Call, inetSocketAddress: java.net.InetSocketAddress, proxy: java.net.Proxy) { activePhase = "TCP: CONNECTING" }
+            override fun secureConnectStart(call: Call) { activePhase = "TLS: HANDSHAKE" }
+            override fun requestHeadersStart(call: Call) { activePhase = "TX: HEADERS" }
+            override fun requestBodyStart(call: Call) { activePhase = "TX: BODY_STREAM" }
+            override fun responseHeadersStart(call: Call) { activePhase = "RX: HEADERS" }
+            override fun responseBodyStart(call: Call) { activePhase = "RX: BODY_STREAM" }
+            override fun callEnd(call: Call) { activePhase = "IDLE" }
+            override fun callFailed(call: Call, ioe: java.io.IOException) { activePhase = "ERR: FAILED" }
+        })
         .connectionPool(ConnectionPool(1, 5, java.util.concurrent.TimeUnit.MINUTES))
         .dispatcher(Dispatcher().apply { maxRequestsPerHost = 1 })
         .addNetworkInterceptor { chain ->
@@ -91,6 +109,20 @@ class MainActivity : ComponentActivity() {
             var input by remember { mutableStateOf("") }
             val scope = rememberCoroutineScope()
 
+            LaunchedEffect(Unit) {
+                var lastUp = TrafficStats.getUidTxBytes(android.os.Process.myUid())
+                var lastDown = TrafficStats.getUidRxBytes(android.os.Process.myUid())
+                while(true) {
+                    delay(1000)
+                    val currUp = TrafficStats.getUidTxBytes(android.os.Process.myUid())
+                    val currDown = TrafficStats.getUidRxBytes(android.os.Process.myUid())
+                    liveSpeedUp = (currUp - lastUp).coerceAtLeast(0L)
+                    liveSpeedDown = (currDown - lastDown).coerceAtLeast(0L)
+                    lastUp = currUp
+                    lastDown = currDown
+                }
+            }
+
             fun dLog(msg: String) {
                 val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
                 debugLogs.add(0, "[$time] $msg")
@@ -115,6 +147,18 @@ class MainActivity : ComponentActivity() {
                         }) {
                             Text("WIPE", color = Color.Red, fontSize = 10.sp)
                         }
+                    }
+                }
+
+                // THE GUTS: Live Telemetry
+                Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF111111)).padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("NET_PHASE: $activePhase", color = Color.White, fontSize = 10.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        Text("STORAGE: ghost-db.sqlite", color = Color.Gray, fontSize = 8.sp)
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                        Text("↑ ${liveSpeedUp / 1024} KB/s", color = if(liveSpeedUp > 0) Color.Cyan else Color.DarkGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("↓ ${liveSpeedDown / 1024} KB/s", color = if(liveSpeedDown > 0) Color.Green else Color.DarkGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
