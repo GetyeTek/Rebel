@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private val client = OkHttpClient.Builder()
+        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
         .dns(object : Dns {
             override fun lookup(hostname: String): List<java.net.InetAddress> {
                 return try {
@@ -344,23 +346,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // HIGH-EFFICIENCY UDP MODE (NTP DISGUISE)
+    // GHOST-DNS MODE (PORT 53 DISGUISE)
     private fun sendGhostUdp(data: ByteArray, serverIp: String) {
         kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val socket = java.net.DatagramSocket()
                 val address = java.net.InetAddress.getByName(serverIp)
                 
-                // NTP Header (48 bytes) + Ghost Payload
-                val ntpPacket = ByteArray(48 + data.size + 1)
-                ntpPacket[0] = 0x1B // LI = 0, VN = 3, Mode = 3 (Client)
-                ntpPacket[48] = uid
-                System.arraycopy(data, 0, ntpPacket, 49, data.size)
+                // DNS Header (12 bytes) + Fake Query + Ghost Payload
+                // Disguising as a standard DNS Query to bypass ISP 1KB limits
+                val dnsPacket = ByteArray(12 + data.size + 2)
+                dnsPacket[0] = (0..255).random().toByte() // Transaction ID
+                dnsPacket[1] = (0..255).random().toByte()
+                dnsPacket[2] = 0x01 // Standard query
+                dnsPacket[5] = 0x01 // 1 Question
                 
-                val packet = java.net.DatagramPacket(ntpPacket, ntpPacket.size, address, 123)
+                dnsPacket[12] = uid // Store UID in the query section
+                System.arraycopy(data, 0, dnsPacket, 13, data.size)
+                
+                val packet = java.net.DatagramPacket(dnsPacket, dnsPacket.size, address, 53)
                 socket.send(packet)
                 socket.close()
-            } catch (e: Exception) { e.printStackTrace() }
+                dLog("UDP-DNS: BURST SENT (${dnsPacket.size}b)")
+            } catch (e: Exception) {
+                dLog("UDP-ERR: ${e.message}")
+            }
         }
     }
 }
